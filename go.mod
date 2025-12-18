@@ -1,3 +1,3 @@
-module github.com/baiuu/Certificate-Allinssl
+module github.com/baiuu/Apisix-Allinssl
 
 go 1.24
