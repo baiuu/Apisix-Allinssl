@@ -65,7 +65,7 @@ func Upload_bind(cfg map[string]any) (*Response, error) {
 	// 只根据证书名称检查是否存在，格式为 "allinssl-<sha256>"
 	certServer, err := a.listCertFromApisix()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list certs from Cloud: %w", err)
+		return nil, fmt.Errorf("failed to list certs from Apisix: %w", err)
 	}
 	// certKey 为空表示未找到匹配的证书
 	var deleteCertKeyList []string = []string{}
@@ -128,7 +128,7 @@ func Upload_bind(cfg map[string]any) (*Response, error) {
 	if certKey == "" {
 		certKey, err = a.uploadCertToApisix(certStr, keyStr, note, domain)
 		if err != nil || certKey == "" {
-			return nil, fmt.Errorf("failed to upload to Cloud: %w", err)
+			return nil, fmt.Errorf("failed to upload to Apisix: %w", err)
 		}
 		if len(deleteCertKeyList) > 0 {
 			// 删除多余的证书绑定
@@ -170,22 +170,11 @@ func (a Auth) uploadCertToApisix(cert, key, note string, domain []string) (strin
 
 	res, err := a.ApisixAPI("/ssls", params, "POST")
 	if err != nil {
-		return "", fmt.Errorf("failed to call Cloud API: %w", err)
+		return "", fmt.Errorf("failed to call Apisix API: %w", err)
 	}
-	code, ok := res["code"].(float64)
-	if !ok {
-		return "", fmt.Errorf("invalid response format: code not found")
-	}
-	if code != 200 {
-		return "", fmt.Errorf("cloud API error: %s", res["msg"])
-	}
-	data, ok := res["data"].(map[string]any)
+	certKey, ok := res["key"].(string)
 	if !ok {
 		return "", fmt.Errorf("invalid response format: data not found")
-	}
-	certKey, ok := data["key"].(string)
-	if !ok {
-		return "", fmt.Errorf("invalid response format: key not found")
 	}
 	return certKey, nil
 }
@@ -214,9 +203,9 @@ func (a Auth) DeleteCertFromApisix(certKey string) (bool, error) {
 func (a Auth) listCertFromApisix() ([]map[string]any, error) {
 	res, err := a.ApisixAPI("/ssls", map[string]interface{}{}, "GET")
 	if err != nil {
-		return nil, fmt.Errorf("failed to call Cloud API: %w", err)
+		return nil, fmt.Errorf("failed to call Apisix API: %w", err)
 	}
-	list, ok := res["list"].(map[string]any)
+	list, ok := res["list"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid response format: data not found")
 	}
