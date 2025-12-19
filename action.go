@@ -105,12 +105,12 @@ func Upload_bind(cfg map[string]any) (*Response, error) {
 			relation = compareSliceRelation(snis, domain)
 		}
 		snisMatch := relation == 2
-		snisPartial := relation == 1
+		snisPartial := relation == 0
 
 		// 如果满足条件，将 id 加入 deleteCertKeyList（去重）：
 		// 1) desc 相同但 snis 不完全一致（包括部分匹配或完全不同）
 		// 2) snis 部分匹配且 desc 不相同
-		if id != "" && ((desc == note && !snisMatch) || (snisPartial && desc != note)) {
+		if id != "" && ((desc == note && !snisMatch) || (!snisPartial && desc != note)) {
 			if !deleteMap[id] {
 				deleteCertKeyList = append(deleteCertKeyList, id)
 				deleteMap[id] = true
