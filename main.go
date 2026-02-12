@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/x509"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -10,12 +11,6 @@ import (
 	"io"
 	"os"
 )
-
-type ActionInfo struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Params      map[string]any `json:"params,omitempty"`
-}
 
 type Request struct {
 	Action string                 `json:"action"`
@@ -28,24 +23,15 @@ type Response struct {
 	Result  map[string]interface{} `json:"result"`
 }
 
-var pluginMeta = map[string]interface{}{
-	"name":        "apisix_api",
-	"description": "APISIX API 插件",
-	"version":     "1.0.0",
-	"author":      "baiuu",
-	"config": map[string]interface{}{
-		"admin_key":      "AdminKey",
-		"server_address": "服务地址",
-	},
-	"actions": []ActionInfo{
-		{
-			Name:        "upload_bind",
-			Description: "上传绑定",
-			Params: map[string]interface{}{
-				"domain": []string{"域名1", "域名2"},
-			},
-		},
-	},
+//go:embed metadata.json
+var metadataJSON []byte
+
+var pluginMeta map[string]interface{}
+
+func init() {
+	if err := json.Unmarshal(metadataJSON, &pluginMeta); err != nil {
+		panic(fmt.Sprintf("解析元数据失败: %v", err))
+	}
 }
 
 func GetSHA256(certStr string) (string, error) {
