@@ -308,10 +308,21 @@ func (a Auth) ApisixAPI(apiPath string, data map[string]interface{}, method stri
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyPreview := string(r)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500] + "..."
+		}
+		return nil, fmt.Errorf("apisix returned HTTP %d: %s", resp.StatusCode, bodyPreview)
+	}
 	var result map[string]interface{}
 	err = json.Unmarshal(r, &result)
 	if err != nil {
-		return nil, err
+		bodyPreview := string(r)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500] + "..."
+		}
+		return nil, fmt.Errorf("apisix response is not valid JSON: %w, response: %s", err, bodyPreview)
 	}
 	return result, nil
 }
