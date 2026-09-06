@@ -54,6 +54,10 @@ func Upload_bind(cfg map[string]any) (*Response, error) {
 			return nil, fmt.Errorf("element at index %d is not a string", i)
 		}
 	}
+	extra, err := parseExtraParams(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("invalid extra params: %w", err)
+	}
 	sha256, err := GetSHA256(certStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SHA256 of cert: %w", err)
@@ -126,7 +130,7 @@ func Upload_bind(cfg map[string]any) (*Response, error) {
 	}
 	// 如果证书不存在，则上传证书
 	if certKey == "" {
-		certKey, err = a.uploadCertToApisix(certStr, keyStr, note, domain)
+		certKey, err = a.uploadCertToApisix(certStr, keyStr, note, domain, extra)
 		if err != nil || certKey == "" {
 			return nil, fmt.Errorf("failed to upload to Apisix: %w", err)
 		}
@@ -160,12 +164,16 @@ func Upload_bind(cfg map[string]any) (*Response, error) {
 	}
 }
 
-func (a Auth) uploadCertToApisix(cert, key, note string, domain []string) (string, error) {
+func (a Auth) uploadCertToApisix(cert, key, note string, domain []string, extra map[string]any) (string, error) {
 	params := map[string]any{
 		"cert": cert,
 		"key":  key,
 		"desc": note,
 		"snis": domain,
+	}
+	// 合并额外参数（cert/key/snis/desc 已在 parseExtraParams 中保护，不会被覆盖）
+	for k, v := range extra {
+		params[k] = v
 	}
 
 	res, err := a.ApisixAPI("/ssls", params, "POST")
@@ -325,4 +333,133 @@ func (a Auth) ApisixAPI(apiPath string, data map[string]interface{}, method stri
 		return nil, fmt.Errorf("apisix response is not valid JSON: %w, response: %s", err, bodyPreview)
 	}
 	return result, nil
+}
+
+// protectedSSLKeys 由插件管理，不允许通过 extra 参数覆盖
+var protectedSSLKeys = map[string]bool{
+	"cert": true,
+	"key":  true,
+	"snis": true,
+	"desc": true,
+}
+
+// parseExtraParams 解析可选的额外参数：
+//   - extra: JSON 字符串或 map，字段原样合并进 ssls 请求体（cert/key/snis/desc 不可覆盖），
+//     例如 {"type":"server","status":1,"ssl_protocols":["TLSv1.2","TLSv1.3"],"labels":{"env":"production"}}
+//   - ocsp_stapling: JSON 字符串或 map，OCSP Stapling 插件参数
+func parseExtraParams(cfg map[string]any) (map[string]any, error) {
+	extra := map[string]any{}
+
+	if v, ok := cfg["extra"]; ok && v != nil {
+		m, err := toStringMap(v, "extra")
+		if err != nil {
+			return nil, err
+		}
+		for k, val := range m {
+			if protectedSSLKeys[k] {
+				return nil, fmt.Errorf("extra cannot override protected field %q", k)
+			}
+			extra[k] = val
+		}
+	}
+
+	if v, ok := cfg["ocsp_stapling"]; ok && v != nil {
+		ocsp, err := parseOCSPStapling(v)
+		if err != nil {
+			return nil, err
+		}
+		if len(ocsp) > 0 {
+			extra["ocsp_stapling"] = ocsp
+		}
+	}
+
+	return extra, nil
+}
+
+// parseOCSPStapling 校验并规范化 ocsp_stapling 插件参数：
+// enabled / skip_verify 为布尔值，cache_ttl 为 >= 60 的整数
+func parseOCSPStapling(v any) (map[string]any, error) {
+	m, err := toStringMap(v, "ocsp_stapling")
+	if err != nil || m == nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	if raw, ok := m["enabled"]; ok {
+		b, err := toBool(raw, "ocsp_stapling.enabled")
+		if err != nil {
+			return nil, err
+		}
+		out["enabled"] = b
+	}
+	if raw, ok := m["skip_verify"]; ok {
+		b, err := toBool(raw, "ocsp_stapling.skip_verify")
+		if err != nil {
+			return nil, err
+		}
+		out["skip_verify"] = b
+	}
+	if raw, ok := m["cache_ttl"]; ok {
+		n, err := toInt64(raw, "ocsp_stapling.cache_ttl")
+		if err != nil {
+			return nil, err
+		}
+		if n < 60 {
+			return nil, fmt.Errorf("ocsp_stapling.cache_ttl must be >= 60, got %d", n)
+		}
+		out["cache_ttl"] = n
+	}
+	return out, nil
+}
+
+// toStringMap 接受 map 或 JSON 对象字符串，统一转换为 map
+func toStringMap(v any, field string) (map[string]any, error) {
+	switch m := v.(type) {
+	case map[string]any:
+		return m, nil
+	case string:
+		if strings.TrimSpace(m) == "" {
+			return nil, nil
+		}
+		var out map[string]any
+		if err := json.Unmarshal([]byte(m), &out); err != nil {
+			return nil, fmt.Errorf("%s must be a JSON object: %w", field, err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%s must be a JSON object string or map, got %T", field, v)
+	}
+}
+
+func toBool(v any, field string) (bool, error) {
+	switch b := v.(type) {
+	case bool:
+		return b, nil
+	case string:
+		switch strings.ToLower(strings.TrimSpace(b)) {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("%s must be a boolean, got %v", field, v)
+}
+
+func toInt64(v any, field string) (int64, error) {
+	switch n := v.(type) {
+	case float64:
+		if n != float64(int64(n)) {
+			return 0, fmt.Errorf("%s must be an integer, got %v", field, v)
+		}
+		return int64(n), nil
+	case json.Number:
+		return n.Int64()
+	case string:
+		parsed, err := json.Number(strings.TrimSpace(n)).Int64()
+		if err != nil {
+			return 0, fmt.Errorf("%s must be an integer: %w", field, err)
+		}
+		return parsed, nil
+	}
+	return 0, fmt.Errorf("%s must be an integer, got %v", field, v)
 }

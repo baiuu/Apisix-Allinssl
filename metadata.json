@@ -27,6 +27,18 @@
           "type": "array",
           "description": "域名列表",
           "required": true
+        },
+        {
+          "name": "ocsp_stapling",
+          "type": "string",
+          "description": "OCSP Stapling 插件参数（JSON 字符串），例如 {\"enabled\":true,\"skip_verify\":false,\"cache_ttl\":3600}",
+          "required": false
+        },
+        {
+          "name": "extra",
+          "type": "string",
+          "description": "其他 ssls 字段（JSON 字符串），原样合并进请求体，例如 {\"type\":\"server\",\"status\":1,\"ssl_protocols\":[\"TLSv1.2\",\"TLSv1.3\"],\"labels\":{\"env\":\"production\"}}",
+          "required": false
         }
       ]
     }
